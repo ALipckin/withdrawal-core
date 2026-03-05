@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:17
+    container_name: "${COMPOSE_PROJECT_NAME}-db"
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_DATABASE}
+      TZ: ${TZ}
+    ports:
+      - "${DB_EXPOSE_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_DATABASE}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: "${COMPOSE_PROJECT_NAME}-app"
+    restart: unless-stopped
+    environment:
+      APP_PORT: "8080"
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_DATABASE: ${DB_DATABASE}
+      DB_HOST: db
+      DB_PORT: "5432"
+      AUTH_BEARER_TOKEN: ${AUTH_BEARER_TOKEN}
+      MIGRATIONS_PATH: file:///workspace/internal/database/migrations
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT}:8080"
+    volumes:
+      - ./:/workspace
+    working_dir: /workspace
+    command: ["go", "run", "./cmd/api"]
+
+volumes:
+  postgres_data:

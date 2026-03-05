@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS users (
+    id BIGSERIAL PRIMARY KEY,
+    balance BIGINT NOT NULL CHECK (balance >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO users (id, balance)
+VALUES (1, 100000)
+ON CONFLICT (id) DO NOTHING;

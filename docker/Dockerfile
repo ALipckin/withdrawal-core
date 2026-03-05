@@ -1,0 +1,10 @@
+FROM golang:1.24-bullseye
+
+WORKDIR /workspace
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+CMD ["go", "run", "./cmd/api"]
