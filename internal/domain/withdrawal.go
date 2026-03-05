@@ -12,4 +12,5 @@ type Withdrawal struct {
 	PayloadHash    string
 	Status         string
 	CreatedAt      time.Time
+	ConfirmedAt    *time.Time
 }

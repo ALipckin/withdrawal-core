@@ -85,40 +85,22 @@ func NewPostgresWithdrawalRepository(db *sql.DB) *PostgresWithdrawalRepository {
 
 func (r *PostgresWithdrawalRepository) GetByUserAndIdempotencyKeyForUpdate(ctx context.Context, tx *sql.Tx, userID int64, key string) (domain.Withdrawal, error) {
 	const query = `
-		SELECT id, user_id, amount, currency, destination, idempotency_key, payload_hash, status, created_at
+		SELECT id, user_id, amount, currency, destination, idempotency_key, payload_hash, status, created_at, confirmed_at
 		FROM withdrawals
 		WHERE user_id = $1 AND idempotency_key = $2
 		FOR UPDATE`
 
-	var withdrawal domain.Withdrawal
-	if err := tx.QueryRowContext(ctx, query, userID, key).Scan(
-		&withdrawal.ID,
-		&withdrawal.UserID,
-		&withdrawal.Amount,
-		&withdrawal.Currency,
-		&withdrawal.Destination,
-		&withdrawal.IdempotencyKey,
-		&withdrawal.PayloadHash,
-		&withdrawal.Status,
-		&withdrawal.CreatedAt,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			return domain.Withdrawal{}, ErrNotFound
-		}
-		return domain.Withdrawal{}, fmt.Errorf("get withdrawal by idempotency key: %w", err)
-	}
-
-	return withdrawal, nil
+	row := tx.QueryRowContext(ctx, query, userID, key)
+	return scanWithdrawal(row)
 }
 
 func (r *PostgresWithdrawalRepository) Create(ctx context.Context, tx *sql.Tx, withdrawal domain.Withdrawal) (domain.Withdrawal, error) {
 	const query = `
 		INSERT INTO withdrawals (user_id, amount, currency, destination, idempotency_key, payload_hash, status)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, created_at`
+		RETURNING id, user_id, amount, currency, destination, idempotency_key, payload_hash, status, created_at, confirmed_at`
 
-	created := withdrawal
-	if err := tx.QueryRowContext(
+	row := tx.QueryRowContext(
 		ctx,
 		query,
 		withdrawal.UserID,
@@ -128,38 +110,40 @@ func (r *PostgresWithdrawalRepository) Create(ctx context.Context, tx *sql.Tx, w
 		withdrawal.IdempotencyKey,
 		withdrawal.PayloadHash,
 		withdrawal.Status,
-	).Scan(&created.ID, &created.CreatedAt); err != nil {
-		return domain.Withdrawal{}, fmt.Errorf("create withdrawal: %w", err)
-	}
-
-	return created, nil
+	)
+	return scanWithdrawal(row)
 }
 
 func (r *PostgresWithdrawalRepository) GetByID(ctx context.Context, id int64) (domain.Withdrawal, error) {
 	const query = `
-		SELECT id, user_id, amount, currency, destination, idempotency_key, payload_hash, status, created_at
+		SELECT id, user_id, amount, currency, destination, idempotency_key, payload_hash, status, created_at, confirmed_at
 		FROM withdrawals
 		WHERE id = $1`
 
-	var withdrawal domain.Withdrawal
-	if err := r.db.QueryRowContext(ctx, query, id).Scan(
-		&withdrawal.ID,
-		&withdrawal.UserID,
-		&withdrawal.Amount,
-		&withdrawal.Currency,
-		&withdrawal.Destination,
-		&withdrawal.IdempotencyKey,
-		&withdrawal.PayloadHash,
-		&withdrawal.Status,
-		&withdrawal.CreatedAt,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			return domain.Withdrawal{}, ErrNotFound
-		}
-		return domain.Withdrawal{}, fmt.Errorf("get withdrawal by id: %w", err)
-	}
+	row := r.db.QueryRowContext(ctx, query, id)
+	return scanWithdrawal(row)
+}
 
-	return withdrawal, nil
+func (r *PostgresWithdrawalRepository) GetByIDForUpdate(ctx context.Context, tx *sql.Tx, id int64) (domain.Withdrawal, error) {
+	const query = `
+		SELECT id, user_id, amount, currency, destination, idempotency_key, payload_hash, status, created_at, confirmed_at
+		FROM withdrawals
+		WHERE id = $1
+		FOR UPDATE`
+
+	row := tx.QueryRowContext(ctx, query, id)
+	return scanWithdrawal(row)
+}
+
+func (r *PostgresWithdrawalRepository) MarkConfirmed(ctx context.Context, tx *sql.Tx, id int64) (domain.Withdrawal, error) {
+	const query = `
+		UPDATE withdrawals
+		SET status = 'confirmed', confirmed_at = NOW()
+		WHERE id = $1
+		RETURNING id, user_id, amount, currency, destination, idempotency_key, payload_hash, status, created_at, confirmed_at`
+
+	row := tx.QueryRowContext(ctx, query, id)
+	return scanWithdrawal(row)
 }
 
 func (r *PostgresWithdrawalRepository) CountByUserID(ctx context.Context, userID int64) (int64, error) {
@@ -171,4 +155,53 @@ func (r *PostgresWithdrawalRepository) CountByUserID(ctx context.Context, userID
 	}
 
 	return count, nil
+}
+
+type PostgresLedgerRepository struct{}
+
+func NewPostgresLedgerRepository() *PostgresLedgerRepository {
+	return &PostgresLedgerRepository{}
+}
+
+func (r *PostgresLedgerRepository) Create(ctx context.Context, tx *sql.Tx, entry domain.LedgerEntry) error {
+	const query = `
+		INSERT INTO ledger_entries (withdrawal_id, user_id, entry_type, amount_delta)
+		VALUES ($1, $2, $3, $4)`
+
+	_, err := tx.ExecContext(ctx, query, entry.WithdrawalID, entry.UserID, entry.EntryType, entry.AmountDelta)
+	if err != nil {
+		return fmt.Errorf("create ledger entry: %w", err)
+	}
+
+	return nil
+}
+
+func scanWithdrawal(row *sql.Row) (domain.Withdrawal, error) {
+	var withdrawal domain.Withdrawal
+	var confirmedAt sql.NullTime
+
+	if err := row.Scan(
+		&withdrawal.ID,
+		&withdrawal.UserID,
+		&withdrawal.Amount,
+		&withdrawal.Currency,
+		&withdrawal.Destination,
+		&withdrawal.IdempotencyKey,
+		&withdrawal.PayloadHash,
+		&withdrawal.Status,
+		&withdrawal.CreatedAt,
+		&confirmedAt,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return domain.Withdrawal{}, ErrNotFound
+		}
+		return domain.Withdrawal{}, fmt.Errorf("scan withdrawal: %w", err)
+	}
+
+	if confirmedAt.Valid {
+		timestamp := confirmedAt.Time
+		withdrawal.ConfirmedAt = &timestamp
+	}
+
+	return withdrawal, nil
 }

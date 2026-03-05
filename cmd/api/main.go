@@ -5,6 +5,7 @@ import (
 	"backend/internal/database"
 	"backend/internal/http/handler"
 	"backend/internal/http/router"
+	"backend/internal/logger"
 	"backend/internal/repository"
 	"backend/internal/service"
 	"log"
@@ -26,8 +27,10 @@ func main() {
 	txManager := repository.NewPostgresTxManager(db)
 	userRepo := repository.NewPostgresUserRepository()
 	withdrawalRepo := repository.NewPostgresWithdrawalRepository(db)
+	ledgerRepo := repository.NewPostgresLedgerRepository()
+	eventLogger := logger.New()
 
-	withdrawalService := service.NewWithdrawalService(txManager, userRepo, withdrawalRepo)
+	withdrawalService := service.NewWithdrawalService(txManager, userRepo, withdrawalRepo, ledgerRepo, eventLogger)
 	withdrawalHandler := handler.NewWithdrawalHandler(withdrawalService)
 
 	server := &http.Server{

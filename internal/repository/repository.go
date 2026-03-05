@@ -22,5 +22,11 @@ type WithdrawalRepository interface {
 	GetByUserAndIdempotencyKeyForUpdate(ctx context.Context, tx *sql.Tx, userID int64, key string) (domain.Withdrawal, error)
 	Create(ctx context.Context, tx *sql.Tx, withdrawal domain.Withdrawal) (domain.Withdrawal, error)
 	GetByID(ctx context.Context, id int64) (domain.Withdrawal, error)
+	GetByIDForUpdate(ctx context.Context, tx *sql.Tx, id int64) (domain.Withdrawal, error)
+	MarkConfirmed(ctx context.Context, tx *sql.Tx, id int64) (domain.Withdrawal, error)
 	CountByUserID(ctx context.Context, userID int64) (int64, error)
+}
+
+type LedgerRepository interface {
+	Create(ctx context.Context, tx *sql.Tx, entry domain.LedgerEntry) error
 }

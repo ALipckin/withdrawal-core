@@ -25,14 +25,15 @@ type createWithdrawalRequest struct {
 }
 
 type withdrawalResponse struct {
-	ID             int64  `json:"id"`
-	UserID         int64  `json:"user_id"`
-	Amount         int64  `json:"amount"`
-	Currency       string `json:"currency"`
-	Destination    string `json:"destination"`
-	IdempotencyKey string `json:"idempotency_key"`
-	Status         string `json:"status"`
-	CreatedAt      string `json:"created_at"`
+	ID             int64   `json:"id"`
+	UserID         int64   `json:"user_id"`
+	Amount         int64   `json:"amount"`
+	Currency       string  `json:"currency"`
+	Destination    string  `json:"destination"`
+	IdempotencyKey string  `json:"idempotency_key"`
+	Status         string  `json:"status"`
+	CreatedAt      string  `json:"created_at"`
+	ConfirmedAt    *string `json:"confirmed_at"`
 }
 
 type errorResponse struct {
@@ -66,10 +67,8 @@ func (h *WithdrawalHandler) CreateWithdrawal(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *WithdrawalHandler) GetWithdrawal(w http.ResponseWriter, r *http.Request) {
-	idRaw := mux.Vars(r)["id"]
-	id, err := strconv.ParseInt(idRaw, 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid withdrawal id")
+	id, ok := parseID(w, r)
+	if !ok {
 		return
 	}
 
@@ -86,6 +85,31 @@ func (h *WithdrawalHandler) GetWithdrawal(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, mapWithdrawal(withdrawal))
 }
 
+func (h *WithdrawalHandler) ConfirmWithdrawal(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+
+	withdrawal, _, err := h.service.ConfirmWithdrawal(r.Context(), id)
+	if err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, mapWithdrawal(withdrawal))
+}
+
+func parseID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	idRaw := mux.Vars(r)["id"]
+	id, err := strconv.ParseInt(idRaw, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid withdrawal id")
+		return 0, false
+	}
+	return id, true
+}
+
 func (h *WithdrawalHandler) handleServiceError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrInvalidAmount),
@@ -97,14 +121,23 @@ func (h *WithdrawalHandler) handleServiceError(w http.ResponseWriter, err error)
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, service.ErrIdempotencyConflict):
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
-	case errors.Is(err, service.ErrUserNotFound):
+	case errors.Is(err, service.ErrUserNotFound),
+		errors.Is(err, service.ErrWithdrawalNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, service.ErrInvalidStatus):
+		writeError(w, http.StatusConflict, err.Error())
 	default:
 		writeError(w, http.StatusInternalServerError, "internal server error")
 	}
 }
 
 func mapWithdrawal(withdrawal domain.Withdrawal) withdrawalResponse {
+	var confirmedAt *string
+	if withdrawal.ConfirmedAt != nil {
+		timestamp := withdrawal.ConfirmedAt.UTC().Format("2006-01-02T15:04:05Z07:00")
+		confirmedAt = &timestamp
+	}
+
 	return withdrawalResponse{
 		ID:             withdrawal.ID,
 		UserID:         withdrawal.UserID,
@@ -114,6 +147,7 @@ func mapWithdrawal(withdrawal domain.Withdrawal) withdrawalResponse {
 		IdempotencyKey: withdrawal.IdempotencyKey,
 		Status:         withdrawal.Status,
 		CreatedAt:      withdrawal.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+		ConfirmedAt:    confirmedAt,
 	}
 }
 

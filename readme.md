@@ -64,6 +64,26 @@ Responses:
 - `404` - withdrawal not found
 - `401` - invalid bearer token
 
+### Confirm withdrawal (optional)
+
+`POST /v1/withdrawals/{id}/confirm`
+
+Headers:
+
+- `Authorization: Bearer dev-token`
+
+Behavior:
+
+- pending -> confirmed;
+- already confirmed -> idempotent replay (`200` without duplicate ledger record).
+
+Responses:
+
+- `200` - confirmed or replay
+- `404` - withdrawal not found
+- `409` - invalid status
+- `401` - invalid bearer token
+
 ## Consistency design
 
 Double spending is prevented by:
@@ -74,6 +94,17 @@ Double spending is prevented by:
 4. Canonical payload hash (`user_id`, `amount`, `currency`, `destination`) stored for key conflict validation.
 
 This guarantees serial balance updates for one user and deterministic idempotent behavior under concurrent requests.
+
+## Optional implementation
+
+- Added `ledger_entries` table for audit trail.
+- On create: ledger entry `withdrawal_create` with `amount_delta = -amount`.
+- On confirm: ledger entry `withdrawal_confirm` with `amount_delta = 0`.
+- Added structured JSON logs for events:
+  - `withdrawal_created`
+  - `withdrawal_create_failed`
+  - `withdrawal_confirmed`
+  - `withdrawal_confirm_failed`
 
 ## Tests
 
@@ -88,7 +119,10 @@ Implemented tests:
 - create success;
 - create insufficient balance;
 - idempotency replay + payload conflict;
-- concurrent create race on same user balance.
+- concurrent create race on same user balance;
+- confirm success;
+- confirm idempotency;
+- concurrent create with same idempotency key.
 
 ## Useful commands
 

@@ -15,6 +15,7 @@ func New(withdrawalHandler *handler.WithdrawalHandler, bearerToken string) http.
 
 	api.HandleFunc("/withdrawals", withdrawalHandler.CreateWithdrawal).Methods(http.MethodPost)
 	api.HandleFunc("/withdrawals/{id}", withdrawalHandler.GetWithdrawal).Methods(http.MethodGet)
+	api.HandleFunc("/withdrawals/{id}/confirm", withdrawalHandler.ConfirmWithdrawal).Methods(http.MethodPost)
 
 	return r
 }
